@@ -12,7 +12,8 @@ type Category = {
   id: string;
   title: string;
   subtitle: string;
-  icon: JSX.Element;
+  iconUrl?: string;
+  iconName?: string;
   gradient: string[];
 };
 
@@ -22,28 +23,28 @@ const BuyerScreen: React.FC<Props> = ({ navigation }) => {
       id: "groceries",
       title: "Groceries",
       subtitle: "Fresh produce, pantry items",
-  icon: <Image source={{ uri: "https://cdn-icons-png.flaticon.com/512/263/263142.png" }} style={{ width: 30, height: 30 }} />,
+      iconUrl: "https://cdn-icons-png.flaticon.com/512/263/263142.png",
       gradient: ["#34d399", "#059669"],
     },
     {
       id: "pharmacy",
       title: "Pharmacy",
       subtitle: "Medicine, health products",
-  icon: <MaterialCommunityIcons name="pill" size={30} color="#fff" />,
+      iconName: "pill",
       gradient: ["#f472b6", "#db2777"],
     },
     {
       id: "food",
       title: "Food",
       subtitle: "Restaurants, fast food",
-  icon: <Image source={{ uri: "https://cdn-icons-png.flaticon.com/512/3075/3075977.png" }} style={{ width: 30, height: 30 }} />,
+      iconUrl: "https://cdn-icons-png.flaticon.com/512/3075/3075977.png",
       gradient: ["#facc15", "#ca8a04"],
     },
     {
       id: "other",
       title: "Other",
       subtitle: "Everything else",
-  icon: <Image source={{ uri: "https://cdn-icons-png.flaticon.com/512/565/565547.png" }} style={{ width: 30, height: 30 }} />,
+      iconUrl: "https://cdn-icons-png.flaticon.com/512/565/565547.png",
       gradient: ["#a78bfa", "#6d28d9"],
     },
   ];
@@ -58,8 +59,14 @@ const BuyerScreen: React.FC<Props> = ({ navigation }) => {
       onPress={() => handleCategorySelect(item)}
       style={styles.categoryWrapper}
     >
-      <LinearGradient colors={item.gradient} style={styles.categoryCard}>
-        <View style={styles.iconWrapper}>{item.icon}</View>
+      <LinearGradient colors={item.gradient as [string, string]} style={styles.categoryCard}>
+        <View style={styles.iconWrapper}>
+          {item.iconUrl ? (
+            <Image source={{ uri: item.iconUrl }} style={{ width: 30, height: 30 }} />
+          ) : item.iconName ? (
+            <MaterialCommunityIcons name={item.iconName as any} size={30} color="#fff" />
+          ) : null}
+        </View>
         <Text style={styles.categoryTitle}>{item.title}</Text>
         <Text style={styles.categorySubtitle}>{item.subtitle}</Text>
       </LinearGradient>

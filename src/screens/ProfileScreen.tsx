@@ -1,6 +1,7 @@
 
 import React, { useEffect, useState } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, Image } from "react-native";
+import * as ImagePicker from "expo-image-picker";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../navigation/AppNavigator";
@@ -18,7 +19,7 @@ export default function ProfileScreen() {
         // Optionally fetch user profile from Users table
         const { data: userProfile } = await supabase
           .from("Users")
-          .select("name")
+          .select("name, profile_pic")
           .eq("user_id", data.user.id)
           .single();
         setUser({ ...data.user, ...userProfile });
@@ -29,6 +30,45 @@ export default function ProfileScreen() {
     };
     fetchUser();
   }, []);
+
+  const handlePickProfilePic = async () => {
+    let result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.7,
+    });
+    if (!result.canceled && result.assets && result.assets[0].uri && user) {
+      const fileName = `${user.id || user.user_id}.png`;
+      // Always upload as PNG
+      let uint8array;
+      let contentType = 'image/png';
+      try {
+        const FileSystem = require('expo-file-system');
+        const base64 = await FileSystem.readAsStringAsync(result.assets[0].uri, { encoding: FileSystem.EncodingType.Base64 });
+        const binaryString = atob(base64);
+        const len = binaryString.length;
+        uint8array = new Uint8Array(len);
+        for (let i = 0; i < len; i++) {
+          uint8array[i] = binaryString.charCodeAt(i);
+        }
+        if (uint8array.length === 0) throw new Error('Image data is empty.');
+      } catch (e) {
+        Alert.alert('Failed to read profile image file (base64)', e instanceof Error ? e.message : String(e));
+        return;
+      }
+      const { error: uploadError } = await supabase.storage.from('profile-pics').upload(fileName, uint8array, { upsert: true, contentType });
+      if (uploadError) {
+        Alert.alert('Upload failed', uploadError.message);
+        return;
+      }
+      const { data: publicUrlData } = supabase.storage.from('profile-pics').getPublicUrl(fileName);
+      const newPic = publicUrlData?.publicUrl;
+      // Update Users table
+      await supabase.from('Users').update({ profile_pic: newPic }).eq('user_id', user.id || user.user_id);
+      setUser((u: any) => ({ ...u, profile_pic: newPic }));
+    }
+  };
 
   const handleSignOut = async () => {
     const { error } = await supabase.auth.signOut();
@@ -48,6 +88,13 @@ export default function ProfileScreen() {
       {user ? (
         <>
           <View style={styles.profileCard}>
+            <TouchableOpacity onPress={handlePickProfilePic} style={{ alignItems: 'center', marginBottom: 10 }}>
+              <Image
+                source={{ uri: user.profile_pic || 'https://cdn-icons-png.flaticon.com/512/149/149071.png' }}
+                style={{ width: 72, height: 72, borderRadius: 36, borderWidth: 2, borderColor: '#34d399', marginBottom: 6 }}
+              />
+              <Text style={{ color: '#bdbdbd', fontSize: 13 }}>Change Profile Picture</Text>
+            </TouchableOpacity>
             <Text style={styles.profileName}>{user.name || user.email}</Text>
             <Text style={styles.profileEmail}>{user.email}</Text>
           </View>

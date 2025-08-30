@@ -1,267 +1,105 @@
-import React, { useState, useEffect } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, FlatList } from "react-native";
+
+import React, { useState, useEffect, useRef } from "react";
+import PendingRequestCard from '../components/PendingRequestCard';
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, FlatList, Image as RNImage } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../navigation/AppNavigator";
 import { supabase } from "../supabase/client";
 
 export default function ActivitiesScreen() {
+  // Fetch activities and helper payment info (only when sign in state changes)
+  useEffect(() => {
+    let interval;
+    const fetchData = async () => {
+      setLoading(true);
+      const { data } = await supabase.auth.getUser();
+      const user = data?.user;
+      setIsSignedIn(!!user);
+      setUserId(user?.id || null);
+      if (user) {
+        // Fetch helper activities: requests the user has accepted to help (Matches where helper_id = user.id)
+        const { data: matches } = await supabase
+          .from("Matches")
+          .select("request_id, accepted_at, Requests(request_id, status, tip, delivery_address, item_list, Users(name))")
+          .eq("helper_id", user.id)
+          .order("accepted_at", { ascending: false });
+        const helperActs = (matches || []).map(m => {
+          const r = Array.isArray(m.Requests) ? m.Requests[0] : m.Requests;
+          return { ...m, Requests: r };
+        });
+        setHelperActivities(helperActs);
+
+        // Fetch request activities (where user is buyer)
+        const { data: requests } = await supabase
+          .from("Requests")
+          .select("*, Users(name)")
+          .eq("buyer_id", user.id)
+          .order("created_at", { ascending: false });
+        setRequestActivities(requests || []);
+      } else {
+        setHelperActivities([]);
+        setRequestActivities([]);
+      }
+      setLoading(false);
+    };
+    fetchData();
+    interval = setInterval(fetchData, 10000);
+    return () => clearInterval(interval);
+  }, []);
   const [activeTab, setActiveTab] = useState<'helper' | 'requests'>('helper');
   const [loading, setLoading] = useState(true);
   const [isSignedIn, setIsSignedIn] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
   const [helperActivities, setHelperActivities] = useState<any[]>([]);
   const [requestActivities, setRequestActivities] = useState<any[]>([]);
+  const [paymentInfoMap, setPaymentInfoMap] = useState<{ [requestId: string]: any }>({});
+  const [buyerPaymentInfoMap, setBuyerPaymentInfoMap] = useState<{ [requestId: string]: any }>({});
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const isFirstLoad = useRef(true);
 
-    useEffect(() => {
-      let interval: NodeJS.Timeout;
-      const fetchData = async () => {
-        setLoading(true);
-        const { data } = await supabase.auth.getUser();
-        const user = data?.user;
-        setIsSignedIn(!!user);
-        setUserId(user?.id || null);
-        if (user) {
-          // Fetch helper activities: requests the user has accepted to help (Matches where helper_id = user.id)
-          const { data: matches } = await supabase
-            .from("Matches")
-            .select("request_id, accepted_at, Requests(request_id, status, tip, delivery_address, item_list, Users(name))")
-            .eq("helper_id", user.id)
-            .order("accepted_at", { ascending: false });
-          setHelperActivities((matches || []).map(m => {
-            const r = Array.isArray(m.Requests) ? m.Requests[0] : m.Requests;
-            return { ...m, Requests: r };
-          }));
 
-          // Fetch request activities (fix: use buyer_id)
-          const { data: requests } = await supabase
-            .from("Requests")
-            .select("*, Users(name)")
-            .eq("buyer_id", user.id)
-            .order("created_at", { ascending: false });
-          setRequestActivities(requests || []);
-        } else {
-          setHelperActivities([]);
-          setRequestActivities([]);
-        }
-        setLoading(false);
-      };
-      fetchData();
-      interval = setInterval(fetchData, 10000); // Poll every 10 seconds
-      return () => clearInterval(interval);
-    }, [isSignedIn]);
-
-    // Helper tab split view rendering
-    const renderHelperTab = () => {
-      if (!isSignedIn) {
-        return (
+  // Fetch activities and helper payment info (only when sign in state changes)
+  return (
+    <View style={styles.container}>
+      <View style={styles.tabBar}>
+        <TouchableOpacity
+          style={[styles.tab, activeTab === 'helper' && styles.activeTab]}
+          onPress={() => setActiveTab('helper')}
+        >
+          <Text style={[styles.tabText, activeTab === 'helper' && styles.activeTabText]}>Helper</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.tab, activeTab === 'requests' && styles.activeTab]}
+          onPress={() => setActiveTab('requests')}
+        >
+          <Text style={[styles.tabText, activeTab === 'requests' && styles.activeTabText]}>Requests</Text>
+        </TouchableOpacity>
+      </View>
+      {activeTab === 'helper' && renderHelperTab({ isSignedIn, helperActivities, navigation, paymentInfoMap })}
+      {activeTab === 'requests' && (
+        isSignedIn ? (
+          requestActivities.length === 0 ? (
+            <Text style={styles.placeholder}>No requests yet.</Text>
+          ) : (
+            <FlatList
+              data={requestActivities}
+              keyExtractor={item => item.request_id}
+              renderItem={({ item }) => <PendingRequestCard item={item} navigation={navigation} />}
+              contentContainerStyle={{ paddingBottom: 24 }}
+            />
+          )
+        ) : (
           <View style={styles.centered}>
-            <Text style={styles.placeholder}>Sign in to view your helper activities.</Text>
+            <Text style={styles.placeholder}>Sign in to view your requests.</Text>
             <TouchableOpacity style={styles.signInBtn} onPress={() => navigation.navigate("SignIn", { requestData: undefined })}>
               <Text style={styles.signInText}>Sign In / Sign Up</Text>
             </TouchableOpacity>
           </View>
-        );
-      }
-      if (helperActivities.length === 0) {
-        return <Text style={styles.placeholder}>No helper activities yet.</Text>;
-      }
-      return (
-        <View>
-          {/* In Progress Orders */}
-          <Text style={[styles.header, { marginBottom: 8 }]}>In Progress</Text>
-          <FlatList
-            data={helperActivities.filter(item => item.Requests?.status === 'on_progress')}
-            keyExtractor={item => `${item.request_id}_${item.Requests?.status || ''}_${item.accepted_at}`}
-            renderItem={({ item }) => {
-              const req = item.Requests;
-              let items: { name: string; image?: string }[] = [];
-              try { items = JSON.parse(req?.item_list || "[]"); } catch { items = []; }
-              return (
-                <TouchableOpacity
-                  style={styles.card}
-                  activeOpacity={0.9}
-                  onPress={() => navigation.navigate("RequestDetail", { request: req })}
-                >
-                  <Text style={styles.buyerName}>{req?.Users?.name ? `Buyer: ${req.Users.name}` : "Buyer"}</Text>
-                  <Text style={styles.address}>Address: {req?.delivery_address}</Text>
-                  <Text style={styles.tip}>Tip: <Text style={styles.tipHighlight}>${req?.tip}</Text></Text>
-                  <Text style={styles.itemsPreview}>{items.length > 0 ? `Items: ${items.length}` : "No items listed."}</Text>
-                  <Text style={styles.status}>Status: {req?.status}</Text>
-                  <View style={{ flexDirection: 'row', marginTop: 10 }}>
-                    <TouchableOpacity
-                      style={[styles.completeBtn, { marginRight: 12 }]}
-                      onPress={async () => {
-                        await supabase
-                          .from("Requests")
-                          .update({ status: "completed" })
-                          .eq("request_id", req.request_id);
-                        // Optionally refresh activities
-                        const { data: matches } = await supabase
-                          .from("Matches")
-                          .select("request_id, accepted_at, Requests(request_id, status, tip, delivery_address, item_list, Users(name))")
-                          .eq("helper_id", userId)
-                          .order("accepted_at", { ascending: false });
-                        setHelperActivities((matches || []).map(m => {
-                          const r = Array.isArray(m.Requests) ? m.Requests[0] : m.Requests;
-                          return { ...m, Requests: r };
-                        }));
-                      }}
-                    >
-                      <Text style={styles.completeText}>Completed</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[styles.completeBtn, { backgroundColor: '#e11d48' }]}
-                      onPress={async () => {
-                        await supabase
-                          .from("Requests")
-                          .update({ status: "pending" })
-                          .eq("request_id", req.request_id);
-                        // Optionally refresh activities
-                        const { data: matches } = await supabase
-                          .from("Matches")
-                          .select("request_id, accepted_at, Requests(request_id, status, tip, delivery_address, item_list, Users(name))")
-                          .eq("helper_id", userId)
-                          .order("accepted_at", { ascending: false });
-                        setHelperActivities((matches || []).map(m => {
-                          const r = Array.isArray(m.Requests) ? m.Requests[0] : m.Requests;
-                          return { ...m, Requests: r };
-                        }));
-                      }}
-                    >
-                      <Text style={styles.completeText}>Reject</Text>
-                    </TouchableOpacity>
-                  </View>
-                </TouchableOpacity>
-              );
-            }}
-            contentContainerStyle={{ paddingBottom: 24 }}
-          />
-          {/* Completed Orders */}
-          <Text style={[styles.header, { marginTop: 24, marginBottom: 8 }]}>Completed</Text>
-          <FlatList
-            data={helperActivities.filter(item => item.Requests?.status === 'completed')}
-            keyExtractor={item => `${item.request_id}_${item.Requests?.status || ''}_${item.accepted_at}`}
-            renderItem={({ item }) => {
-              const req = item.Requests;
-              let items: { name: string; image?: string }[] = [];
-              try { items = JSON.parse(req?.item_list || "[]"); } catch { items = []; }
-              return (
-                <TouchableOpacity
-                  style={styles.card}
-                  activeOpacity={0.9}
-                  onPress={() => navigation.navigate("RequestDetail", { request: req })}
-                >
-                  <Text style={styles.buyerName}>{req?.Users?.name ? `Buyer: ${req.Users.name}` : "Buyer"}</Text>
-                  <Text style={styles.address}>Address: {req?.delivery_address}</Text>
-                  <Text style={styles.tip}>Tip: <Text style={styles.tipHighlight}>${req?.tip}</Text></Text>
-                  <Text style={styles.itemsPreview}>{items.length > 0 ? `Items: ${items.length}` : "No items listed."}</Text>
-                  <Text style={styles.status}>Status: {req?.status}</Text>
-                </TouchableOpacity>
-              );
-            }}
-            contentContainerStyle={{ paddingBottom: 24 }}
-          />
-        </View>
-      );
-    };
-
-    if (loading) {
-      return (
-        <View style={styles.centered}>
-          <ActivityIndicator size="large" color="#34d399" />
-        </View>
-      );
-    }
-
-    return (
-      <View style={styles.container}>
-        <View style={styles.tabBar}>
-          <TouchableOpacity
-            style={[styles.tab, activeTab === 'helper' && styles.activeTab]}
-            onPress={() => setActiveTab('helper')}
-          >
-            <Text style={[styles.tabText, activeTab === 'helper' && styles.activeTabText]}>Helper</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.tab, activeTab === 'requests' && styles.activeTab]}
-            onPress={() => setActiveTab('requests')}
-          >
-            <Text style={[styles.tabText, activeTab === 'requests' && styles.activeTabText]}>Requests</Text>
-          </TouchableOpacity>
-        </View>
-        {activeTab === 'helper' ? (
-          renderHelperTab()
-        ) : (
-          isSignedIn ? (
-            requestActivities.length === 0 ? (
-              <Text style={styles.placeholder}>No requests yet.</Text>
-            ) : (
-              <FlatList
-                data={requestActivities}
-                keyExtractor={item => item.request_id}
-                renderItem={({ item }) => {
-                  let items: { name: string; image?: string }[] = [];
-                  try { items = JSON.parse(item?.item_list || "[]"); } catch { items = []; }
-                  const isPending = item.status === 'pending';
-                  return (
-                    <View style={styles.card}>
-                      <TouchableOpacity
-                        activeOpacity={0.9}
-                        onPress={() => navigation.navigate("RequestDetail", { request: item })}
-                      >
-                        <Text style={styles.buyerName}>{item?.Users?.name ? `Buyer: ${item.Users.name}` : "Buyer"}</Text>
-                        <Text style={styles.address}>Address: {item?.delivery_address}</Text>
-                        <Text style={styles.tip}>Tip: <Text style={styles.tipHighlight}>${item?.tip}</Text></Text>
-                        <Text style={styles.itemsPreview}>{items.length > 0 ? `Items: ${items.length}` : "No items listed."}</Text>
-                        <Text style={styles.status}>Status: {item?.status}</Text>
-                      </TouchableOpacity>
-                      {isPending && (
-                        <View style={{ flexDirection: 'row', marginTop: 12, justifyContent: 'flex-end' }}>
-                          <TouchableOpacity
-                            style={[styles.completeBtn, { backgroundColor: '#e11d48', marginRight: 10 }]}
-                            onPress={async () => {
-                              await supabase
-                                .from("Requests")
-                                .delete()
-                                .eq("request_id", item.request_id);
-                              // Refresh list
-                              const { data: requests } = await supabase
-                                .from("Requests")
-                                .select("*, Users(name)")
-                                .eq("buyer_id", userId)
-                                .order("created_at", { ascending: false });
-                              setRequestActivities(requests || []);
-                            }}
-                          >
-                            <Text style={styles.completeText}>Delete</Text>
-                          </TouchableOpacity>
-                          <TouchableOpacity
-                            style={[styles.completeBtn, { backgroundColor: '#2563eb' }]}
-                            onPress={() => navigation.navigate("RequestForm", { requestToUpdate: item })}
-                          >
-                            <Text style={styles.completeText}>Update</Text>
-                          </TouchableOpacity>
-                        </View>
-                      )}
-                    </View>
-                  );
-                }}
-                contentContainerStyle={{ paddingBottom: 24 }}
-              />
-            )
-          ) : (
-            <View style={styles.centered}>
-              <Text style={styles.placeholder}>Sign in to view your requests.</Text>
-              <TouchableOpacity style={styles.signInBtn} onPress={() => navigation.navigate("SignIn", { requestData: undefined })}>
-                <Text style={styles.signInText}>Sign In / Sign Up</Text>
-              </TouchableOpacity>
-            </View>
-          )
-        )}
-      </View>
-    );
+        )
+      )}
+    </View>
+  );
 }
 
 
@@ -314,5 +152,136 @@ const styles = StyleSheet.create({
     marginTop: 8,
     marginBottom: 4,
   },
+});
+
+// Helper tab split view rendering as a separate function (now after styles)
+function renderHelperTab({ isSignedIn, helperActivities, navigation, paymentInfoMap }: {
+  isSignedIn: boolean;
+  helperActivities: any[];
+  navigation: any;
+  paymentInfoMap: { [requestId: string]: any };
+}) {
+  if (!isSignedIn) {
+    return (
+      <View style={styles.centered}>
+        <Text style={styles.placeholder}>Sign in to view your helper activities.</Text>
+        <TouchableOpacity style={styles.signInBtn} onPress={() => navigation.navigate("SignIn", { requestData: undefined })}>
+          <Text style={styles.signInText}>Sign In / Sign Up</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+  if (helperActivities.length === 0) {
+    return <Text style={styles.placeholder}>No helper activities yet.</Text>;
+  }
+  return (
+    <View>
+      {/* In Progress Orders */}
+      <Text style={[styles.header, { marginBottom: 8 }]}>In Progress</Text>
+      <FlatList
+        data={helperActivities.filter(item => item.Requests?.status === 'on_progress')}
+        keyExtractor={item => `${item.request_id}_${item.Requests?.status || ''}_${item.accepted_at}`}
+        renderItem={({ item }) => {
+          const req = item.Requests;
+          let items: { name: string; image?: string }[] = [];
+          try { items = JSON.parse(req?.item_list || "[]"); } catch { items = []; }
+          return (
+            <TouchableOpacity
+              style={styles.card}
+              activeOpacity={0.9}
+              onPress={() => navigation.navigate("RequestDetail", { request: req })}
+            >
+              <Text style={styles.buyerName}>{req?.Users?.name ? `Buyer: ${req.Users.name}` : "Buyer"}</Text>
+              <Text style={styles.address}>Address: {req?.delivery_address}</Text>
+              <Text style={styles.tip}>Tip: <Text style={styles.tipHighlight}>${req?.tip}</Text></Text>
+              <Text style={styles.itemsPreview}>{items.length > 0 ? `Items: ${items.length}` : "No items listed."}</Text>
+              <Text style={styles.status}>Status: {req?.status}</Text>
+              <View style={{ flexDirection: 'row', marginTop: 10 }}>
+                <TouchableOpacity
+                  style={[styles.completeBtn, { marginRight: 12, backgroundColor: '#2563eb' }]}
+                  onPress={async () => {
+                    // Update status to 'receipt_uploaded' and navigate to PaymentUploadScreen
+                    await supabase
+                      .from("Requests")
+                      .update({ status: "receipt_uploaded" })
+                      .eq("request_id", req.request_id);
+                    navigation.navigate("PaymentUpload", { requestId: req.request_id });
+                  }}
+                >
+                  <Text style={styles.completeText}>Upload Receipt</Text>
+                </TouchableOpacity>
+              </View>
+            </TouchableOpacity>
+          );
+        }}
+        contentContainerStyle={{ paddingBottom: 24 }}
+      />
+
+      {/* Payment Waiting (Receipt Uploaded) Orders */}
+      <Text style={[styles.header, { marginTop: 24, marginBottom: 8 }]}>Payment Waiting</Text>
+      <FlatList
+        data={helperActivities.filter(item => item.Requests?.status === 'receipt_uploaded')}
+        keyExtractor={item => `${item.request_id}_${item.Requests?.status || ''}_${item.accepted_at}`}
+        renderItem={({ item }) => {
+          const req = item.Requests;
+          const payment = paymentInfoMap[req.request_id];
+          return (
+            <TouchableOpacity
+              style={styles.card}
+              activeOpacity={0.9}
+              onPress={() => navigation.navigate("RequestDetail", { request: req })}
+            >
+              <Text style={styles.buyerName}>{req?.Users?.name ? `Buyer: ${req.Users.name}` : "Buyer"}</Text>
+              <Text style={styles.address}>Address: {req?.delivery_address}</Text>
+              <Text style={styles.tip}>Tip: <Text style={styles.tipHighlight}>${req?.tip}</Text></Text>
+              <Text style={styles.itemsPreview}>{payment ? `Final Price: $${payment.final_price}` : 'Loading payment info...'}</Text>
+              <Text style={styles.status}>Status: {payment ? payment.status : 'pending'}</Text>
+              <View style={{ flexDirection: 'row', marginTop: 10 }}>
+                <TouchableOpacity
+                  style={[styles.completeBtn, { backgroundColor: '#34d399' }]}
+                  onPress={async (e) => {
+                    e.stopPropagation && e.stopPropagation();
+                    await supabase
+                      .from("Requests")
+                      .update({ status: "completed" })
+                      .eq("request_id", req.request_id);
+                    // Optionally refresh list here
+                  }}
+                >
+                  <Text style={styles.completeText}>Mark as Completed</Text>
+                </TouchableOpacity>
+              </View>
+            </TouchableOpacity>
+          );
+        }}
+        contentContainerStyle={{ paddingBottom: 24 }}
+      />
+      {/* Completed Orders */}
+      <Text style={[styles.header, { marginTop: 24, marginBottom: 8 }]}>Completed</Text>
+      <FlatList
+        data={helperActivities.filter(item => item.Requests?.status === 'completed')}
+        keyExtractor={item => `${item.request_id}_${item.Requests?.status || ''}_${item.accepted_at}`}
+        renderItem={({ item }) => {
+          const req = item.Requests;
+          let items: { name: string; image?: string }[] = [];
+          try { items = JSON.parse(req?.item_list || "[]"); } catch { items = []; }
+          return (
+            <TouchableOpacity
+              style={styles.card}
+              activeOpacity={0.9}
+              onPress={() => navigation.navigate("RequestDetail", { request: req })}
+            >
+              <Text style={styles.buyerName}>{req?.Users?.name ? `Buyer: ${req.Users.name}` : "Buyer"}</Text>
+              <Text style={styles.address}>Address: {req?.delivery_address}</Text>
+              <Text style={styles.tip}>Tip: <Text style={styles.tipHighlight}>${req?.tip}</Text></Text>
+              <Text style={styles.itemsPreview}>{items.length > 0 ? `Items: ${items.length}` : "No items listed."}</Text>
+              <Text style={styles.status}>Status: {req?.status}</Text>
+            </TouchableOpacity>
+          );
+        }}
+        contentContainerStyle={{ paddingBottom: 24 }}
+      />
+    </View>
+  );
 }
-);
+

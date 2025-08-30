@@ -7,6 +7,11 @@ import * as ImagePicker from "expo-image-picker";
 import { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { RootStackParamList } from "../navigation/AppNavigator";
 import { supabase } from "../supabase/client";
+import MapView, { Marker } from 'react-native-maps';
+import * as Location from 'expo-location';
+import { GOOGLE_MAPS_API_KEY } from '../env';
+import * as SecureStore from 'expo-secure-store';
+import { Modal, Dimensions, Alert } from 'react-native';
 
 
 type Props = NativeStackScreenProps<RootStackParamList, "RequestForm">;
@@ -17,10 +22,29 @@ type Product = {
 };
 
 export default function RequestFormScreen({ route, navigation }: Props) {
+  const [latitude, setLatitude] = useState<number | null>(null);
+  const [longitude, setLongitude] = useState<number | null>(null);
+  const [region, setRegion] = useState<any>(null);
+  const [mapModalVisible, setMapModalVisible] = useState(false);
 
   // Support editing existing request
   const requestToUpdate = route.params?.requestToUpdate;
   const category = route.params?.category || requestToUpdate?.category;
+  const [estimatedPrice, setEstimatedPrice] = useState(requestToUpdate ? String(requestToUpdate.estimated_price || '') : '');
+  const [paymentMethod, setPaymentMethod] = useState<'cod' | 'online'>(requestToUpdate?.payment_method || 'cod');
+  // Helper to render category icon if present
+  const renderCategoryIcon = () => {
+    if (!category) return null;
+    if (category.iconUrl) {
+      return <Image source={{ uri: category.iconUrl }} style={{ width: 30, height: 30, marginRight: 10 }} />;
+    }
+    if (category.iconName) {
+      return <RNImage source={{ uri: "https://cdn-icons-png.flaticon.com/512/2972/2972415.png" }} style={{ width: 30, height: 30, marginRight: 10 }} />;
+      // Or use Ionicons/MaterialCommunityIcons if you want vector icons
+      // return <MaterialCommunityIcons name={category.iconName} size={30} color="#fff" style={{ marginRight: 10 }} />;
+    }
+    return null;
+  };
   const isPharmacy = category?.id === "pharmacy";
 
   const [products, setProducts] = useState<Product[]>(
@@ -36,6 +60,40 @@ export default function RequestFormScreen({ route, navigation }: Props) {
   );
   const [tip, setTip] = useState(requestToUpdate ? String(requestToUpdate.tip) : "");
   const [location, setLocation] = useState(requestToUpdate ? requestToUpdate.delivery_address || "" : "");
+  // On mount, prefill with user's home location
+  React.useEffect(() => {
+    (async () => {
+      // If editing, use request's lat/lng if present
+      if (requestToUpdate && requestToUpdate.latitude && requestToUpdate.longitude) {
+        setLatitude(requestToUpdate.latitude);
+        setLongitude(requestToUpdate.longitude);
+        setRegion({
+          latitude: requestToUpdate.latitude,
+          longitude: requestToUpdate.longitude,
+          latitudeDelta: 0.01,
+          longitudeDelta: 0.01,
+        });
+        setLocation(requestToUpdate.delivery_address || "");
+        return;
+      }
+      // Get userId from SecureStore
+      let userId = await SecureStore.getItemAsync('userId');
+      if (!userId) return;
+      // Fetch user home location from Users table
+      let { data: user, error } = await supabase.from('Users').select('latitude,longitude,address').eq('user_id', userId).single();
+      if (user) {
+        setLatitude(user.latitude);
+        setLongitude(user.longitude);
+        setRegion({
+          latitude: user.latitude,
+          longitude: user.longitude,
+          latitudeDelta: 0.01,
+          longitudeDelta: 0.01,
+        });
+        setLocation((prev: string) => prev || user.address || "");
+      }
+    })();
+  }, []);
   const [updating, setUpdating] = useState(false);
 
   // Add a new empty product field
@@ -64,6 +122,11 @@ export default function RequestFormScreen({ route, navigation }: Props) {
       alert("For pharmacy, please upload at least one product photo.");
       return;
     }
+    // Only block if lat/lng are truly null or undefined
+    if ((latitude === null || longitude === null || typeof latitude === 'undefined' || typeof longitude === 'undefined') || !location) {
+      Alert.alert('Please select a delivery location on the map.');
+      return;
+    }
     if (requestToUpdate) {
       // Update existing request
       setUpdating(true);
@@ -73,6 +136,10 @@ export default function RequestFormScreen({ route, navigation }: Props) {
           item_list: JSON.stringify(products),
           tip: Number(tip) || 0,
           delivery_address: location,
+          latitude,
+          longitude,
+          estimated_price: estimatedPrice ? Number(estimatedPrice) : null,
+          payment_method: paymentMethod,
         })
         .eq("request_id", requestToUpdate.request_id);
       setUpdating(false);
@@ -83,14 +150,30 @@ export default function RequestFormScreen({ route, navigation }: Props) {
       navigation.goBack();
       return;
     }
-    navigation.navigate("AuthCheck", {
-      requestData: {
-        products,
-        tip,
-        location,
-        category,
-      },
-    });
+    // Save new request directly to Requests table with estimated_price and payment_method
+    setUpdating(true);
+    const userId = await SecureStore.getItemAsync('userId');
+    const { data, error } = await supabase
+      .from("Requests")
+      .insert([
+        {
+          buyer_id: userId,
+          item_list: JSON.stringify(products),
+          tip: Number(tip) || 0,
+          delivery_address: location,
+          latitude,
+          longitude,
+          estimated_price: estimatedPrice ? Number(estimatedPrice) : null,
+          payment_method: paymentMethod,
+          status: 'pending',
+        },
+      ]);
+    setUpdating(false);
+    if (error) {
+      alert("Failed to create request: " + error.message);
+      return;
+    }
+  navigation.navigate("RequestSuccess");
   };
 
   return (
@@ -104,7 +187,10 @@ export default function RequestFormScreen({ route, navigation }: Props) {
                 style={{ width: 26, height: 26, tintColor: '#fff' }}
               />
             </TouchableOpacity>
-            <Text style={styles.header}>{category?.title || "Request"}</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 8 }}>
+              {renderCategoryIcon()}
+              <Text style={styles.header}>{category?.title || "Request"}</Text>
+            </View>
             <Text style={styles.subheader}>Fill in your request details</Text>
 
             <Text style={styles.label}>Products to buy</Text>
@@ -144,6 +230,22 @@ export default function RequestFormScreen({ route, navigation }: Props) {
               <Text style={styles.addBtnText}>Add Product</Text>
             </TouchableOpacity>
 
+            {/* Estimated Price (optional) */}
+            <View style={styles.inputGroup}>
+              <RNImage
+                source={{ uri: "https://cdn-icons-png.flaticon.com/512/148/148767.png" }}
+                style={{ width: 22, height: 22, tintColor: '#fff', marginRight: 8 }}
+              />
+              <TextInput
+                style={styles.input}
+                placeholder="Estimated price (optional)"
+                placeholderTextColor="#bdbdbd"
+                keyboardType="numeric"
+                value={estimatedPrice}
+                onChangeText={setEstimatedPrice}
+              />
+            </View>
+            {/* Tip */}
             <View style={styles.inputGroup}>
               <RNImage
                 source={{ uri: "https://cdn-icons-png.flaticon.com/512/25/25473.png" }}
@@ -159,19 +261,155 @@ export default function RequestFormScreen({ route, navigation }: Props) {
               />
             </View>
 
-            <View style={styles.inputGroup}>
-              <RNImage
-                source={{ uri: "https://cdn-icons-png.flaticon.com/512/684/684908.png" }}
-                style={{ width: 22, height: 22, tintColor: '#fff', marginRight: 8 }}
-              />
+            {/* Payment Method Selection */}
+            <Text style={styles.label}>Payment Method</Text>
+            <View style={{ flexDirection: 'row', marginBottom: 8 }}>
+              <TouchableOpacity
+                style={[styles.paymentMethodBtn, paymentMethod === 'cod' && styles.paymentMethodBtnActive]}
+                onPress={() => setPaymentMethod('cod')}
+              >
+                <Text style={[styles.paymentMethodText, paymentMethod === 'cod' && styles.paymentMethodTextActive]}>Cash on Delivery</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.paymentMethodBtn, paymentMethod === 'online' && styles.paymentMethodBtnActive]}
+                onPress={() => setPaymentMethod('online')}
+              >
+                <Text style={[styles.paymentMethodText, paymentMethod === 'online' && styles.paymentMethodTextActive]}>Online Payment</Text>
+              </TouchableOpacity>
+            </View>
+            <Text style={{ color: '#fbbf24', fontSize: 13, marginBottom: 8 }}>
+              Final price will be set by the helper’s receipt after purchase. You will pay the actual cost plus tip.
+            </Text>
+
+            <Text style={styles.label}>Delivery Location</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
               <TextInput
-                style={styles.input}
-                placeholder="Delivery location"
+                style={{
+                  backgroundColor: 'rgba(255,255,255,0.09)',
+                  borderRadius: 10,
+                  paddingHorizontal: 14,
+                  paddingVertical: 10,
+                  color: '#fff',
+                  fontSize: 15,
+                  flex: 1,
+                  marginRight: 8,
+                }}
+                placeholder="Delivery address"
                 placeholderTextColor="#bdbdbd"
                 value={location}
                 onChangeText={setLocation}
+                returnKeyType="done"
               />
+              <TouchableOpacity
+                style={{ backgroundColor: '#34d399', borderRadius: 8, padding: 10 }}
+                onPress={() => setMapModalVisible(true)}
+              >
+                <Ionicons name="map-outline" size={22} color="#fff" />
+              </TouchableOpacity>
             </View>
+            <View style={{ height: 220, borderRadius: 12, overflow: 'hidden', marginBottom: 12 }}>
+              <MapView
+                style={{ flex: 1 }}
+                region={region || {
+                  latitude: latitude || 7.2906,
+                  longitude: longitude || 80.6337,
+                  latitudeDelta: 0.01,
+                  longitudeDelta: 0.01,
+                }}
+                showsUserLocation={true}
+                // ...existing code for MapView props and onPress handler...
+              >
+                {latitude && longitude && (
+                  <Marker coordinate={{ latitude, longitude }} />
+                )}
+              </MapView>
+            </View>
+            <Text style={{ color: '#bdbdbd', fontSize: 13, marginBottom: 4 }}>
+              {latitude && longitude ? `Lat: ${latitude.toFixed(5)}, Lng: ${longitude.toFixed(5)}` : 'Tap on the map to select delivery location.'}
+            </Text>
+            {/* Full Screen Map Modal */}
+            <Modal
+              visible={mapModalVisible}
+              animationType="slide"
+              transparent={false}
+              onRequestClose={() => setMapModalVisible(false)}
+            >
+              <View style={{ flex: 1, backgroundColor: '#141218' }}>
+                <Text style={{ color: '#fff', fontWeight: '700', fontSize: 18, textAlign: 'center', marginTop: 32, marginBottom: 8 }}>Pick Delivery Location</Text>
+                <MapView
+                  style={{ flex: 1 }}
+                  initialRegion={region || {
+                    latitude: latitude || 7.2906,
+                    longitude: longitude || 80.6337,
+                    latitudeDelta: 0.01,
+                    longitudeDelta: 0.01,
+                  }}
+                  region={region || {
+                    latitude: latitude || 7.2906,
+                    longitude: longitude || 80.6337,
+                    latitudeDelta: 0.01,
+                    longitudeDelta: 0.01,
+                  }}
+                  showsUserLocation={true}
+                  onPress={(e) => {
+                    setLatitude(e.nativeEvent.coordinate.latitude);
+                    setLongitude(e.nativeEvent.coordinate.longitude);
+                    setRegion({
+                      latitude: e.nativeEvent.coordinate.latitude,
+                      longitude: e.nativeEvent.coordinate.longitude,
+                      latitudeDelta: 0.01,
+                      longitudeDelta: 0.01,
+                    });
+                    // Try Google Maps Geocoding API for detailed address
+                    (async () => {
+                      try {
+                        const response = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?latlng=${e.nativeEvent.coordinate.latitude},${e.nativeEvent.coordinate.longitude}&key=${GOOGLE_MAPS_API_KEY}`);
+                        const data = await response.json();
+                        if (data.status === 'OK' && data.results && data.results.length > 0) {
+                          const result = data.results[0];
+                          setLocation(result.formatted_address);
+                          console.log('Google Geocode result:', result);
+                          Alert.alert('Address auto-filled (Google)', result.formatted_address);
+                        } else {
+                          throw new Error('No Google geocode result');
+                        }
+                      } catch (err) {
+                        // Fallback to Expo reverse geocode
+                        let geocode = await Location.reverseGeocodeAsync({
+                          latitude: e.nativeEvent.coordinate.latitude,
+                          longitude: e.nativeEvent.coordinate.longitude,
+                        });
+                        if (geocode && geocode.length > 0) {
+                          const g = geocode[0];
+                          const addressParts = [
+                            g.name || '',
+                            g.street || '',
+                            g.subregion || '',
+                            g.district || '',
+                            g.city || '',
+                            g.region || '',
+                            g.postalCode || '',
+                            g.country || ''
+                          ].filter(Boolean);
+                          setLocation(addressParts.join(', '));
+                          Alert.alert('Address auto-filled (Expo)', addressParts.join(', '));
+                        }
+                      }
+                    })();
+                  }}
+                >
+                  {latitude && longitude && (
+                    <Marker coordinate={{ latitude, longitude }} />
+                  )}
+                </MapView>
+                <TouchableOpacity
+                  style={{ backgroundColor: '#34d399', borderRadius: 12, padding: 16, margin: 24 }}
+                  onPress={() => setMapModalVisible(false)}
+                >
+                  <Text style={{ color: '#fff', fontWeight: '700', fontSize: 16, textAlign: 'center' }}>Confirm Location</Text>
+                </TouchableOpacity>
+              </View>
+            </Modal>
 
             <TouchableOpacity style={styles.button} onPress={handleSubmit} disabled={updating}>
               <LinearGradient colors={["#34d399", "#059669"]} style={styles.buttonGradient}>
@@ -186,6 +424,25 @@ export default function RequestFormScreen({ route, navigation }: Props) {
 }
 
 const styles = StyleSheet.create({
+  paymentMethodBtn: {
+    flex: 1,
+    backgroundColor: 'rgba(255,255,255,0.07)',
+    borderRadius: 10,
+    paddingVertical: 12,
+    marginRight: 8,
+    alignItems: 'center',
+  },
+  paymentMethodBtnActive: {
+    backgroundColor: '#34d399',
+  },
+  paymentMethodText: {
+    color: '#bdbdbd',
+    fontWeight: '600',
+    fontSize: 15,
+  },
+  paymentMethodTextActive: {
+    color: '#fff',
+  },
   backBtn: {
     position: "absolute",
     top: 0,
