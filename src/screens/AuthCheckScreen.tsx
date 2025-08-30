@@ -7,7 +7,7 @@ import { supabase } from "../supabase/client";
 type Props = NativeStackScreenProps<RootStackParamList, 'AuthCheck'>;
 
 const AuthCheckScreen: React.FC<Props> = ({ route, navigation }) => {
-  const { requestData } = route.params || {};
+  const { requestData, acceptRequestId } = route.params || {};
 
   useEffect(() => {
     const checkAuth = async () => {
@@ -15,7 +15,11 @@ const AuthCheckScreen: React.FC<Props> = ({ route, navigation }) => {
       const userIsSignedIn = !!data?.user;
 
       if (userIsSignedIn) {
-        navigation.replace("SubmitRequest", { requestData });
+        if (acceptRequestId) {
+          navigation.replace("AcceptRequest", { acceptRequestId });
+        } else {
+          navigation.replace("SubmitRequest", { requestData });
+        }
       }
       // else: show sign in/up options below
     };
@@ -27,10 +31,10 @@ const AuthCheckScreen: React.FC<Props> = ({ route, navigation }) => {
       <ActivityIndicator size="large" color="#34d399" />
       <Text style={styles.text}>Checking authentication...</Text>
       <View style={styles.actions}>
-        <TouchableOpacity onPress={() => navigation.navigate("SignIn", { requestData })}>
+        <TouchableOpacity onPress={() => navigation.navigate("SignIn", { requestData, acceptRequestId })}>
           <Text style={styles.link}>Sign In</Text>
         </TouchableOpacity>
-        <TouchableOpacity onPress={() => navigation.navigate("SignUp", { requestData })}>
+        <TouchableOpacity onPress={() => navigation.navigate("SignUp", { requestData, acceptRequestId })}>
           <Text style={styles.link}>Sign Up</Text>
         </TouchableOpacity>
       </View>

@@ -22,17 +22,18 @@ export type RootStackParamList = {
   Home: undefined;
   Buyer: undefined;
   Helper: undefined;
-  SignIn: { requestData?: any };
-  SignUp: { requestData?: any };
+  SignIn: { requestData?: any; acceptRequestId?: string };
+  SignUp: { requestData?: any; acceptRequestId?: string };
   PaymentScreen: undefined;
   RequestForm: { category?: any; requestToUpdate?: any };
-  AuthCheck: { requestData: any };
+  AuthCheck: { requestData?: any; acceptRequestId?: string };
   SubmitRequest: { requestData: any };
   RequestSuccess: undefined;
   RequestDetail: { request: any };
   HelperOrderProgress: { requestId: string };
   Chat: { request_id: string; currentUserId: string };
   PaymentUpload: { requestId: string };
+  AcceptRequest: { acceptRequestId: string };
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -56,6 +57,7 @@ export default function AppNavigator() {
   <Stack.Screen name="HelperOrderProgress" component={require("../screens/HelperOrderProgressScreen").default} options={{ headerShown: false }} />
   <Stack.Screen name="Chat" component={require("../screens/ChatScreen").default} options={{ headerShown: false }} />
   <Stack.Screen name="PaymentUpload" component={require("../screens/PaymentUploadScreen").default} options={{ headerShown: true, title: 'Upload Receipt' }} />
+        <Stack.Screen name="AcceptRequest" component={require("../screens/AcceptRequestScreen").default} options={{ headerShown: false }} />
       </Stack.Navigator>
     </NavigationContainer>
   );

@@ -17,12 +17,22 @@ const SubmitRequestScreen: React.FC<Props> = ({ route, navigation }) => {
         if (userError || !userData?.user?.id) throw userError || new Error("User not found");
         const buyer_id = userData.user.id;
 
-        // 2. Prepare request data
-        const { products, tip, location } = requestData;
+        // 2. Prepare request data (all fields)
+        const {
+          products,
+          tip,
+          location,
+          latitude,
+          longitude,
+          estimatedPrice,
+          paymentMethod,
+          buyLocation,
+          category,
+        } = requestData;
         const item_list = JSON.stringify(products);
         const status = "pending";
 
-        // 3. Insert into Requests table
+        // 3. Insert into Requests table with all fields
         const { error } = await supabase.from("Requests").insert([
           {
             buyer_id,
@@ -30,6 +40,12 @@ const SubmitRequestScreen: React.FC<Props> = ({ route, navigation }) => {
             tip: Number(tip) || 0,
             status,
             delivery_address: location,
+            latitude,
+            longitude,
+            estimated_price: estimatedPrice ? Number(estimatedPrice) : null,
+            payment_method: paymentMethod,
+            product_purchase_location: buyLocation || null,
+            category_id: category?.id || null,
           },
         ]);
         if (error) throw error;

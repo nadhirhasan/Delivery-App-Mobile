@@ -96,7 +96,7 @@ function RequestDetailScreen({ route, navigation }: Props) {
   const { request: initialRequest } = route.params;
   const [request, setRequest] = useState(initialRequest);
   const isFirstLoad = useRef(true);
-  const [items, setItems] = useState<{ name: string; image?: string }[]>([]);
+  const [items, setItems] = useState<{ name: string; image?: string; quantity?: string; unit?: string }[]>([]);
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [accepting, setAccepting] = useState(false);
@@ -245,7 +245,7 @@ function RequestDetailScreen({ route, navigation }: Props) {
       const { data: userData, error: userError } = await supabase.auth.getUser();
       if (userError || !userData?.user?.id) {
         setAccepting(false);
-        navigation.navigate("AuthCheck", { requestData: { request } });
+        navigation.navigate("AuthCheck", { acceptRequestId: request.request_id });
         return;
       }
       const helper_id = userData.user.id;
@@ -384,6 +384,13 @@ function RequestDetailScreen({ route, navigation }: Props) {
         <Text style={styles.label}>Buyer:</Text>
         <Text style={styles.value}>{request.Users?.name || "Unknown"}</Text>
 
+        {/* Show buy location if present */}
+        {request.product_purchase_location && (
+          <>
+            <Text style={styles.label}>Buy Location:</Text>
+            <Text style={styles.value}>{request.product_purchase_location}</Text>
+          </>
+        )}
         {/* Only show address if not completed */}
         {request.status !== 'completed' && (
           <>
@@ -428,7 +435,14 @@ function RequestDetailScreen({ route, navigation }: Props) {
                   <Ionicons name="help-circle-outline" size={28} color="#888" style={{ alignSelf: 'center', marginTop: 7 }} />
                 </View>
               )}
-              <Text style={styles.itemName}>{item.name}</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.itemName}>{item.name}</Text>
+                {(item.quantity || item.unit) && (
+                  <Text style={{ color: '#bdbdbd', fontSize: 13, marginTop: 2 }}>
+                    {item.quantity || '1'} {item.unit || 'pcs'}
+                  </Text>
+                )}
+              </View>
             </View>
           ))}
         </View>

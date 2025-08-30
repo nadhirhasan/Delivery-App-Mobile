@@ -18,17 +18,20 @@ type Props = NativeStackScreenProps<RootStackParamList, "RequestForm">;
 
 type Product = {
   name: string;
+  quantity?: string;
+  unit?: string;
   image?: string | null;
 };
 
 export default function RequestFormScreen({ route, navigation }: Props) {
+  const requestToUpdate = route.params?.requestToUpdate;
+  const [buyLocation, setBuyLocation] = useState(requestToUpdate ? requestToUpdate.product_purchase_location || '' : '');
   const [latitude, setLatitude] = useState<number | null>(null);
   const [longitude, setLongitude] = useState<number | null>(null);
   const [region, setRegion] = useState<any>(null);
   const [mapModalVisible, setMapModalVisible] = useState(false);
 
   // Support editing existing request
-  const requestToUpdate = route.params?.requestToUpdate;
   const category = route.params?.category || requestToUpdate?.category;
   const [estimatedPrice, setEstimatedPrice] = useState(requestToUpdate ? String(requestToUpdate.estimated_price || '') : '');
   const [paymentMethod, setPaymentMethod] = useState<'cod' | 'online'>(requestToUpdate?.payment_method || 'cod');
@@ -51,12 +54,18 @@ export default function RequestFormScreen({ route, navigation }: Props) {
     requestToUpdate
       ? (() => {
           try {
-            return JSON.parse(requestToUpdate.item_list || "[]");
+            // Add quantity/unit if missing for backward compatibility
+            return JSON.parse(requestToUpdate.item_list || "[]").map((p: any) => ({
+              name: p.name || "",
+              quantity: p.quantity || "1",
+              unit: p.unit || "pcs",
+              image: p.image || null,
+            }));
           } catch {
-            return [{ name: "", image: null }];
+            return [{ name: "", quantity: "1", unit: "pcs", image: null }];
           }
         })()
-      : [{ name: "", image: null }]
+      : [{ name: "", quantity: "1", unit: "pcs", image: null }]
   );
   const [tip, setTip] = useState(requestToUpdate ? String(requestToUpdate.tip) : "");
   const [location, setLocation] = useState(requestToUpdate ? requestToUpdate.delivery_address || "" : "");
@@ -97,12 +106,18 @@ export default function RequestFormScreen({ route, navigation }: Props) {
   const [updating, setUpdating] = useState(false);
 
   // Add a new empty product field
-  const addProduct = () => setProducts([...products, { name: "", image: null }]);
+  const addProduct = () => setProducts([...products, { name: "", quantity: "1", unit: "pcs", image: null }]);
   // Remove a product field
   const removeProduct = (idx: number) => setProducts(products.filter((_, i) => i !== idx));
   // Update a product name
   const updateProductName = (text: string, idx: number) =>
     setProducts(products.map((p, i) => (i === idx ? { ...p, name: text } : p)));
+  // Update a product quantity
+  const updateProductQuantity = (text: string, idx: number) =>
+    setProducts(products.map((p, i) => (i === idx ? { ...p, quantity: text.replace(/[^0-9.]/g, "") } : p)));
+  // Update a product unit
+  const updateProductUnit = (text: string, idx: number) =>
+    setProducts(products.map((p, i) => (i === idx ? { ...p, unit: text || "pcs" } : p)));
   // Update a product image
   const updateProductImage = async (idx: number) => {
     let result = await ImagePicker.launchImageLibraryAsync({
@@ -118,6 +133,26 @@ export default function RequestFormScreen({ route, navigation }: Props) {
 
 
   const handleSubmit = async () => {
+    // Block if not signed in: check both SecureStore and Supabase session
+    const userId = await SecureStore.getItemAsync('userId');
+    const { data: userData, error: userError } = await supabase.auth.getUser();
+    const supabaseUserId = userData?.user?.id;
+    if (!userId || !supabaseUserId || userId !== supabaseUserId) {
+      navigation.navigate('SignIn', {
+        requestData: {
+          products,
+          tip,
+          location,
+          latitude,
+          longitude,
+          estimatedPrice,
+          paymentMethod,
+          buyLocation,
+          category,
+        },
+      });
+      return;
+    }
     if (isPharmacy && !products.some(p => p.image)) {
       alert("For pharmacy, please upload at least one product photo.");
       return;
@@ -130,16 +165,23 @@ export default function RequestFormScreen({ route, navigation }: Props) {
     if (requestToUpdate) {
       // Update existing request
       setUpdating(true);
+      // Ensure all products have quantity and unit before saving
+      const productsToSave = products.map(p => ({
+        ...p,
+        quantity: p.quantity || "1",
+        unit: p.unit || "pcs",
+      }));
       const { error } = await supabase
         .from("Requests")
         .update({
-          item_list: JSON.stringify(products),
+          item_list: JSON.stringify(productsToSave),
           tip: Number(tip) || 0,
           delivery_address: location,
           latitude,
           longitude,
           estimated_price: estimatedPrice ? Number(estimatedPrice) : null,
           payment_method: paymentMethod,
+          product_purchase_location: buyLocation || null,
         })
         .eq("request_id", requestToUpdate.request_id);
       setUpdating(false);
@@ -152,19 +194,25 @@ export default function RequestFormScreen({ route, navigation }: Props) {
     }
     // Save new request directly to Requests table with estimated_price and payment_method
     setUpdating(true);
-    const userId = await SecureStore.getItemAsync('userId');
+    // Ensure all products have quantity and unit before saving
+    const productsToSave = products.map(p => ({
+      ...p,
+      quantity: p.quantity || "1",
+      unit: p.unit || "pcs",
+    }));
     const { data, error } = await supabase
       .from("Requests")
       .insert([
         {
           buyer_id: userId,
-          item_list: JSON.stringify(products),
+          item_list: JSON.stringify(productsToSave),
           tip: Number(tip) || 0,
           delivery_address: location,
           latitude,
           longitude,
           estimated_price: estimatedPrice ? Number(estimatedPrice) : null,
           payment_method: paymentMethod,
+          product_purchase_location: buyLocation || null,
           status: 'pending',
         },
       ]);
@@ -197,11 +245,29 @@ export default function RequestFormScreen({ route, navigation }: Props) {
             {products.map((product, index) => (
               <View key={index} style={styles.productRow}>
                 <TextInput
-                  style={styles.input}
+                  style={[styles.input, { flex: 2 }]}
                   placeholder={`Product ${index + 1}`}
                   placeholderTextColor="#bdbdbd"
                   value={product.name}
                   onChangeText={text => updateProductName(text, index)}
+                />
+                <TextInput
+                  style={[styles.input, { flex: 1, marginLeft: 6, minWidth: 40 }]}
+                  placeholder="Qty"
+                  placeholderTextColor="#bdbdbd"
+                  value={product.quantity}
+                  onChangeText={text => updateProductQuantity(text, index)}
+                  keyboardType="numeric"
+                  maxLength={6}
+                />
+                <TextInput
+                  style={[styles.input, { flex: 1, marginLeft: 6, minWidth: 50 }]}
+                  placeholder="Unit (e.g. pcs, kg)"
+                  placeholderTextColor="#bdbdbd"
+                  value={product.unit}
+                  onChangeText={text => updateProductUnit(text, index)}
+                  autoCapitalize="none"
+                  maxLength={10}
                 />
                 <TouchableOpacity style={styles.productImgBtn} onPress={() => updateProductImage(index)}>
                   <RNImage
@@ -230,6 +296,23 @@ export default function RequestFormScreen({ route, navigation }: Props) {
               <Text style={styles.addBtnText}>Add Product</Text>
             </TouchableOpacity>
 
+            {/* Buy Location (optional) */}
+            <View style={styles.inputGroup}>
+              <RNImage
+                source={{ uri: "https://cdn-icons-png.flaticon.com/512/535/535239.png" }}
+                style={{ width: 22, height: 22, tintColor: '#fff', marginRight: 8 }}
+              />
+              <TextInput
+                style={styles.input}
+                placeholder="e.g. Supermarket, Pharmacy, Restaurant, etc. (optional)"
+                placeholderTextColor="#bdbdbd"
+                value={buyLocation}
+                onChangeText={setBuyLocation}
+                autoCapitalize="words"
+                returnKeyType="done"
+              />
+            </View>
+
             {/* Estimated Price (optional) */}
             <View style={styles.inputGroup}>
               <RNImage
@@ -245,6 +328,7 @@ export default function RequestFormScreen({ route, navigation }: Props) {
                 onChangeText={setEstimatedPrice}
               />
             </View>
+
             {/* Tip */}
             <View style={styles.inputGroup}>
               <RNImage
@@ -317,7 +401,6 @@ export default function RequestFormScreen({ route, navigation }: Props) {
                   longitudeDelta: 0.01,
                 }}
                 showsUserLocation={true}
-                // ...existing code for MapView props and onPress handler...
               >
                 {latitude && longitude && (
                   <Marker coordinate={{ latitude, longitude }} />
@@ -327,6 +410,7 @@ export default function RequestFormScreen({ route, navigation }: Props) {
             <Text style={{ color: '#bdbdbd', fontSize: 13, marginBottom: 4 }}>
               {latitude && longitude ? `Lat: ${latitude.toFixed(5)}, Lng: ${longitude.toFixed(5)}` : 'Tap on the map to select delivery location.'}
             </Text>
+
             {/* Full Screen Map Modal */}
             <Modal
               visible={mapModalVisible}
@@ -368,13 +452,9 @@ export default function RequestFormScreen({ route, navigation }: Props) {
                         if (data.status === 'OK' && data.results && data.results.length > 0) {
                           const result = data.results[0];
                           setLocation(result.formatted_address);
-                          console.log('Google Geocode result:', result);
                           Alert.alert('Address auto-filled (Google)', result.formatted_address);
-                        } else {
-                          throw new Error('No Google geocode result');
                         }
                       } catch (err) {
-                        // Fallback to Expo reverse geocode
                         let geocode = await Location.reverseGeocodeAsync({
                           latitude: e.nativeEvent.coordinate.latitude,
                           longitude: e.nativeEvent.coordinate.longitude,
