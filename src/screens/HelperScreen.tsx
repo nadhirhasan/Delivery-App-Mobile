@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { GOOGLE_MAPS_API_KEY } from '../env';
 import { View, Text, FlatList, ActivityIndicator, StyleSheet, TouchableOpacity, Alert } from "react-native";
 import { supabase } from "../supabase/client";
 import { useNavigation } from "@react-navigation/native";
@@ -72,13 +73,51 @@ export default function HelperScreen() {
     fetchAll();
   }, []);
 
-  // Filter and sort requests by proximity
+  // Fetch walking distance from Google Directions API for each request
+  const [distanceMap, setDistanceMap] = useState<{ [requestId: string]: string }>({});
   let sortedRequests: any[] = requests;
   let locationRef = activeTab === 'nearMe' ? currentLocation : homeLocation;
+  useEffect(() => {
+    async function fetchDistances() {
+      if (!locationRef || requests.length === 0) return;
+      const newDistanceMap: { [requestId: string]: string } = {};
+      await Promise.all(requests.filter(r => r.latitude && r.longitude).map(async (r) => {
+        const orig = `${locationRef.latitude},${locationRef.longitude}`;
+        const dest = `${r.latitude},${r.longitude}`;
+        const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${orig}&destination=${dest}&mode=walking&key=${GOOGLE_MAPS_API_KEY}`;
+        try {
+          const response = await fetch(url);
+          const data = await response.json();
+          if (data.routes && data.routes.length > 0) {
+            newDistanceMap[r.request_id] = data.routes[0].legs[0].distance.text;
+          } else {
+            newDistanceMap[r.request_id] = '';
+          }
+        } catch {
+          newDistanceMap[r.request_id] = '';
+        }
+      }));
+      setDistanceMap(newDistanceMap);
+    }
+    fetchDistances();
+    // Only re-run if location or requests change
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [locationRef?.latitude, locationRef?.longitude, requests]);
+
+  // Sort requests by walking distance if available, else fallback to straight line
   if (locationRef && requests.length > 0) {
     sortedRequests = [...requests]
       .filter(r => r.latitude && r.longitude)
-      .map(r => ({ ...r, _distance: getDistanceKm(locationRef.latitude, locationRef.longitude, r.latitude, r.longitude) }))
+      .map(r => {
+        const distStr = distanceMap[r.request_id];
+        let distNum = null;
+        if (distStr) {
+          // Try to parse km or m
+          if (distStr.includes('km')) distNum = parseFloat(distStr);
+          else if (distStr.includes('m')) distNum = parseFloat(distStr) / 1000;
+        }
+        return { ...r, _distance: distNum !== null ? distNum : getDistanceKm(locationRef.latitude, locationRef.longitude, r.latitude, r.longitude), _distanceText: distStr };
+      })
       .sort((a, b) => a._distance - b._distance);
   }
 
@@ -134,8 +173,12 @@ export default function HelperScreen() {
                   {item.Users?.name ? `Buyer: ${item.Users.name}` : "Buyer"}
                 </Text>
                 <Text style={styles.address}>Address: {item.delivery_address}</Text>
-                {typeof item._distance === 'number' && (
-                  <Text style={styles.distance}>{item._distance.toFixed(2)} km away</Text>
+                {item._distanceText ? (
+                  <Text style={styles.distance}>{item._distanceText} away</Text>
+                ) : (
+                  typeof item._distance === 'number' && (
+                    <Text style={styles.distance}>{item._distance.toFixed(2)} km away</Text>
+                  )
                 )}
                 <Text style={styles.tip}>
                   Tip: <Text style={styles.tipHighlight}>${item.tip}</Text>

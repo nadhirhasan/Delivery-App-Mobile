@@ -117,7 +117,7 @@ export default function RequestFormScreen({ route, navigation }: Props) {
     setProducts(products.map((p, i) => (i === idx ? { ...p, quantity: text.replace(/[^0-9.]/g, "") } : p)));
   // Update a product unit
   const updateProductUnit = (text: string, idx: number) =>
-    setProducts(products.map((p, i) => (i === idx ? { ...p, unit: text || "pcs" } : p)));
+    setProducts(products.map((p, i) => (i === idx ? { ...p, unit: text } : p)));
   // Update a product image
   const updateProductImage = async (idx: number) => {
     let result = await ImagePicker.launchImageLibraryAsync({
@@ -450,9 +450,30 @@ export default function RequestFormScreen({ route, navigation }: Props) {
                         const response = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?latlng=${e.nativeEvent.coordinate.latitude},${e.nativeEvent.coordinate.longitude}&key=${GOOGLE_MAPS_API_KEY}`);
                         const data = await response.json();
                         if (data.status === 'OK' && data.results && data.results.length > 0) {
-                          const result = data.results[0];
-                          setLocation(result.formatted_address);
-                          Alert.alert('Address auto-filled (Google)', result.formatted_address);
+                          // Find the most detailed result (with most address_components)
+                          let bestResult = data.results[0];
+                          for (const r of data.results) {
+                            if (r.address_components && r.address_components.length > bestResult.address_components.length) {
+                              bestResult = r;
+                            }
+                          }
+                          // Build a detailed address string
+                          const getComponent = (type: string) => {
+                            const comp = bestResult.address_components.find((c: any) => c.types.includes(type));
+                            return comp ? comp.long_name : '';
+                          };
+                          const addressParts = [
+                            getComponent('route'), // road
+                            getComponent('sublocality'),
+                            getComponent('locality'), // city/town
+                            getComponent('administrative_area_level_2'), // district
+                            getComponent('administrative_area_level_1'), // state/province
+                            getComponent('country'),
+                            getComponent('postal_code'),
+                          ].filter(Boolean);
+                          const detailedAddress = addressParts.join(', ');
+                          setLocation(detailedAddress || bestResult.formatted_address);
+                          Alert.alert('Address auto-filled (Google)', detailedAddress || bestResult.formatted_address);
                         }
                       } catch (err) {
                         let geocode = await Location.reverseGeocodeAsync({

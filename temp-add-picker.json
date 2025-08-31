@@ -1,0 +1,6 @@
+{
+  "name": "DeliveryAppMobile",
+  "dependencies": {
+    "@react-native-picker/picker": "^2.4.10"
+  }
+}

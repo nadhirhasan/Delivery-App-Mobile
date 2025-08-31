@@ -1,13 +1,14 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import PendingRequestCard from '../components/PendingRequestCard';
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, FlatList, Image as RNImage } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, FlatList, Image as RNImage, ScrollView } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../navigation/AppNavigator";
 import { supabase } from "../supabase/client";
 
 export default function ActivitiesScreen() {
+  const [filter, setFilter] = useState('on_progress');
   // Fetch activities and helper payment info (only when sign in state changes)
   useEffect(() => {
     let interval;
@@ -76,7 +77,7 @@ export default function ActivitiesScreen() {
           <Text style={[styles.tabText, activeTab === 'requests' && styles.activeTabText]}>Requests</Text>
         </TouchableOpacity>
       </View>
-      {activeTab === 'helper' && renderHelperTab({ isSignedIn, helperActivities, navigation, paymentInfoMap })}
+  {activeTab === 'helper' && renderHelperTabWithFilter({ isSignedIn, helperActivities, navigation, paymentInfoMap, filter, setFilter })}
       {activeTab === 'requests' && (
         isSignedIn ? (
           requestActivities.length === 0 ? (
@@ -155,11 +156,13 @@ const styles = StyleSheet.create({
 });
 
 // Helper tab split view rendering as a separate function (now after styles)
-function renderHelperTab({ isSignedIn, helperActivities, navigation, paymentInfoMap }: {
+function renderHelperTabWithFilter({ isSignedIn, helperActivities, navigation, paymentInfoMap, filter, setFilter }: {
   isSignedIn: boolean;
   helperActivities: any[];
   navigation: any;
   paymentInfoMap: { [requestId: string]: any };
+  filter: string;
+  setFilter: (f: string) => void;
 }) {
   if (!isSignedIn) {
     return (
@@ -174,97 +177,89 @@ function renderHelperTab({ isSignedIn, helperActivities, navigation, paymentInfo
   if (helperActivities.length === 0) {
     return <Text style={styles.placeholder}>No helper activities yet.</Text>;
   }
+  // Filter buttons
   return (
     <View>
-      {/* In Progress Orders */}
-      <Text style={[styles.header, { marginBottom: 8 }]}>In Progress</Text>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-around', marginBottom: 12 }}>
+        <TouchableOpacity onPress={() => setFilter('on_progress')} style={[styles.tab, filter === 'on_progress' && styles.activeTab]}>
+          <Text style={[styles.tabText, filter === 'on_progress' && styles.activeTabText]}>In Progress</Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => setFilter('receipt_uploaded')} style={[styles.tab, filter === 'receipt_uploaded' && styles.activeTab]}>
+          <Text style={[styles.tabText, filter === 'receipt_uploaded' && styles.activeTabText]}>Payment Waiting</Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => setFilter('completed')} style={[styles.tab, filter === 'completed' && styles.activeTab]}>
+          <Text style={[styles.tabText, filter === 'completed' && styles.activeTabText]}>Completed</Text>
+        </TouchableOpacity>
+      </View>
       <FlatList
-        data={helperActivities.filter(item => item.Requests?.status === 'on_progress')}
+        data={helperActivities.filter(item => item.Requests?.status === filter)}
         keyExtractor={item => `${item.request_id}_${item.Requests?.status || ''}_${item.accepted_at}`}
         renderItem={({ item }) => {
           const req = item.Requests;
           let items: { name: string; image?: string }[] = [];
           try { items = JSON.parse(req?.item_list || "[]"); } catch { items = []; }
-          return (
-            <TouchableOpacity
-              style={styles.card}
-              activeOpacity={0.9}
-              onPress={() => navigation.navigate("RequestDetail", { request: req })}
-            >
-              <Text style={styles.buyerName}>{req?.Users?.name ? `Buyer: ${req.Users.name}` : "Buyer"}</Text>
-              <Text style={styles.address}>Address: {req?.delivery_address}</Text>
-              <Text style={styles.tip}>Tip: <Text style={styles.tipHighlight}>${req?.tip}</Text></Text>
-              <Text style={styles.itemsPreview}>{items.length > 0 ? `Items: ${items.length}` : "No items listed."}</Text>
-              <Text style={styles.status}>Status: {req?.status}</Text>
-              <View style={{ flexDirection: 'row', marginTop: 10 }}>
-                <TouchableOpacity
-                  style={[styles.completeBtn, { marginRight: 12, backgroundColor: '#2563eb' }]}
-                  onPress={async () => {
-                    // Update status to 'receipt_uploaded' and navigate to PaymentUploadScreen
-                    await supabase
-                      .from("Requests")
-                      .update({ status: "receipt_uploaded" })
-                      .eq("request_id", req.request_id);
-                    navigation.navigate("PaymentUpload", { requestId: req.request_id });
-                  }}
-                >
-                  <Text style={styles.completeText}>Upload Receipt</Text>
-                </TouchableOpacity>
-              </View>
-            </TouchableOpacity>
-          );
-        }}
-        contentContainerStyle={{ paddingBottom: 24 }}
-      />
-
-      {/* Payment Waiting (Receipt Uploaded) Orders */}
-      <Text style={[styles.header, { marginTop: 24, marginBottom: 8 }]}>Payment Waiting</Text>
-      <FlatList
-        data={helperActivities.filter(item => item.Requests?.status === 'receipt_uploaded')}
-        keyExtractor={item => `${item.request_id}_${item.Requests?.status || ''}_${item.accepted_at}`}
-        renderItem={({ item }) => {
-          const req = item.Requests;
-          const payment = paymentInfoMap[req.request_id];
-          return (
-            <TouchableOpacity
-              style={styles.card}
-              activeOpacity={0.9}
-              onPress={() => navigation.navigate("RequestDetail", { request: req })}
-            >
-              <Text style={styles.buyerName}>{req?.Users?.name ? `Buyer: ${req.Users.name}` : "Buyer"}</Text>
-              <Text style={styles.address}>Address: {req?.delivery_address}</Text>
-              <Text style={styles.tip}>Tip: <Text style={styles.tipHighlight}>${req?.tip}</Text></Text>
-              <Text style={styles.itemsPreview}>{payment ? `Final Price: $${payment.final_price}` : 'Loading payment info...'}</Text>
-              <Text style={styles.status}>Status: {payment ? payment.status : 'pending'}</Text>
-              <View style={{ flexDirection: 'row', marginTop: 10 }}>
-                <TouchableOpacity
-                  style={[styles.completeBtn, { backgroundColor: '#34d399' }]}
-                  onPress={async (e) => {
-                    e.stopPropagation && e.stopPropagation();
-                    await supabase
-                      .from("Requests")
-                      .update({ status: "completed" })
-                      .eq("request_id", req.request_id);
-                    // Optionally refresh list here
-                  }}
-                >
-                  <Text style={styles.completeText}>Mark as Completed</Text>
-                </TouchableOpacity>
-              </View>
-            </TouchableOpacity>
-          );
-        }}
-        contentContainerStyle={{ paddingBottom: 24 }}
-      />
-      {/* Completed Orders */}
-      <Text style={[styles.header, { marginTop: 24, marginBottom: 8 }]}>Completed</Text>
-      <FlatList
-        data={helperActivities.filter(item => item.Requests?.status === 'completed')}
-        keyExtractor={item => `${item.request_id}_${item.Requests?.status || ''}_${item.accepted_at}`}
-        renderItem={({ item }) => {
-          const req = item.Requests;
-          let items: { name: string; image?: string }[] = [];
-          try { items = JSON.parse(req?.item_list || "[]"); } catch { items = []; }
+          if (filter === 'receipt_uploaded') {
+            const payment = paymentInfoMap[req.request_id];
+            return (
+              <TouchableOpacity
+                style={styles.card}
+                activeOpacity={0.9}
+                onPress={() => navigation.navigate("RequestDetail", { request: req })}
+              >
+                <Text style={styles.buyerName}>{req?.Users?.name ? `Buyer: ${req.Users.name}` : "Buyer"}</Text>
+                <Text style={styles.address}>Address: {req?.delivery_address}</Text>
+                <Text style={styles.tip}>Tip: <Text style={styles.tipHighlight}>${req?.tip}</Text></Text>
+                <Text style={styles.itemsPreview}>{payment ? `Final Price: $${payment.final_price}` : 'Loading payment info...'}</Text>
+                <Text style={styles.status}>Status: {payment ? payment.status : 'pending'}</Text>
+                <View style={{ flexDirection: 'row', marginTop: 6 }}>
+                  <TouchableOpacity
+                    style={[styles.completeBtn, { backgroundColor: '#34d399', paddingVertical: 6, paddingHorizontal: 12 }]}
+                    onPress={async (e) => {
+                      e.stopPropagation && e.stopPropagation();
+                      await supabase
+                        .from("Requests")
+                        .update({ status: "completed" })
+                        .eq("request_id", req.request_id);
+                      // Optionally refresh list here
+                    }}
+                  >
+                    <Text style={styles.completeText}>Mark as Completed</Text>
+                  </TouchableOpacity>
+                </View>
+              </TouchableOpacity>
+            );
+          }
+          if (filter === 'on_progress') {
+            return (
+              <TouchableOpacity
+                style={styles.card}
+                activeOpacity={0.9}
+                onPress={() => navigation.navigate("RequestDetail", { request: req })}
+              >
+                <Text style={styles.buyerName}>{req?.Users?.name ? `Buyer: ${req.Users.name}` : "Buyer"}</Text>
+                <Text style={styles.address}>Address: {req?.delivery_address}</Text>
+                <Text style={styles.tip}>Tip: <Text style={styles.tipHighlight}>${req?.tip}</Text></Text>
+                <Text style={styles.itemsPreview}>{items.length > 0 ? `Items: ${items.length}` : "No items listed."}</Text>
+                <Text style={styles.status}>Status: {req?.status}</Text>
+                <View style={{ flexDirection: 'row', marginTop: 6 }}>
+                  <TouchableOpacity
+                    style={[styles.completeBtn, { marginRight: 12, backgroundColor: '#2563eb', paddingVertical: 6, paddingHorizontal: 12 }]}
+                    onPress={async () => {
+                      // Update status to 'receipt_uploaded' and navigate to PaymentUploadScreen
+                      await supabase
+                        .from("Requests")
+                        .update({ status: "receipt_uploaded" })
+                        .eq("request_id", req.request_id);
+                      navigation.navigate("PaymentUpload", { requestId: req.request_id });
+                    }}
+                  >
+                    <Text style={styles.completeText}>Upload Receipt</Text>
+                  </TouchableOpacity>
+                </View>
+              </TouchableOpacity>
+            );
+          }
+          // Completed
           return (
             <TouchableOpacity
               style={styles.card}

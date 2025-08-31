@@ -91,7 +91,15 @@ export default function HelperOrderProgressScreen({ route, navigation }: Props) 
         <Text style={styles.address}>Address: {req?.delivery_address}</Text>
         <Text style={styles.tip}>Tip: <Text style={styles.tipHighlight}>${req?.tip}</Text></Text>
         <Text style={styles.itemsPreview}>{items.length > 0 ? `Items: ${items.length}` : "No items listed."}</Text>
-        {isInProgress && (
+        {isInProgress && req?.status === 'on_progress' && (
+          <TouchableOpacity
+            style={[styles.uploadBtn, { marginTop: 12 }]}
+            onPress={() => navigation.navigate('PaymentUpload', { requestId: req.request_id })}
+          >
+            <Text style={styles.uploadText}>Upload Receipt</Text>
+          </TouchableOpacity>
+        )}
+        {isInProgress && req?.status === 'receipt_uploaded' && (
           <TouchableOpacity style={styles.completeBtn} onPress={() => handleComplete(req.request_id)}>
             <Text style={styles.completeText}>Mark as Completed</Text>
           </TouchableOpacity>
@@ -172,6 +180,18 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 18,
     alignSelf: "flex-start",
+  },
+  uploadBtn: {
+    backgroundColor: '#fbbf24',
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 18,
+    alignItems: 'center',
+  },
+  uploadText: {
+    color: '#232136',
+    fontWeight: '700',
+    fontSize: 15,
   },
   completeText: { color: "#fff", fontWeight: "700", fontSize: 15 },
   backBtn: { marginTop: 32, backgroundColor: "#232136", borderRadius: 12, paddingVertical: 12, paddingHorizontal: 32, borderWidth: 1, borderColor: "#c7c7cc", alignSelf: "center" },

@@ -167,27 +167,51 @@ function RequestDetailScreen({ route, navigation }: Props) {
         setRouteDistance(null);
         setRouteDuration(null);
 
-        // Fetch route from Google Directions API
-        const dest = `${request.latitude},${request.longitude}`;
-        const orig = `${origin.latitude},${origin.longitude}`;
-        const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${orig}&destination=${dest}&mode=driving&key=${GOOGLE_MAPS_API_KEY}`;
-        const response = await fetch(url);
-        const data = await response.json();
-        if (data.routes && data.routes.length > 0) {
-          const points = data.routes[0].overview_polyline.points;
-          const coords = polyline.decode(points).map(([lat, lng]: [number, number]) => ({ latitude: lat, longitude: lng }));
-          if (isMounted) {
-            setRouteCoords(coords);
-            setRouteDistance(data.routes[0].legs[0].distance.text);
-            setRouteDuration(data.routes[0].legs[0].duration.text);
-          }
-        } else {
-          if (isMounted) {
-            setRouteCoords(null);
-            setRouteDistance(null);
-            setRouteDuration(null);
-          }
-        }
+  // Fetch route from Google Directions API with motorcycle option
+  const dest = `${request.latitude},${request.longitude}`;
+  const orig = `${origin.latitude},${origin.longitude}`;
+  // Use 'driving' mode and specify 'motorcycle' as vehicle type if supported, and request alternatives
+  // Google Directions API supports 'vehicle= motorcycle' in some regions (mainly Southeast Asia)
+  const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${orig}&destination=${dest}&mode=walking&key=${GOOGLE_MAPS_API_KEY}`;
+  const response = await fetch(url);
+  const data = await response.json();
+  // Log all routes for debugging
+  if (data.routes && data.routes.length > 0) {
+    console.log('Google Directions API routes:', data.routes.map((r: any) => ({
+      summary: r.summary,
+      distance: r.legs[0].distance,
+      duration: r.legs[0].duration,
+      warnings: r.warnings,
+      overview_polyline_length: r.overview_polyline.points.length
+    })));
+  } else {
+    console.log('Google Directions API returned no routes:', data);
+  }
+  if (data.routes && data.routes.length > 0) {
+    // Find the route with the shortest distance
+    let shortestRoute = data.routes[0];
+    let minDistance = data.routes[0].legs[0].distance.value;
+    for (let i = 1; i < data.routes.length; i++) {
+      const dist = data.routes[i].legs[0].distance.value;
+      if (dist < minDistance) {
+        minDistance = dist;
+        shortestRoute = data.routes[i];
+      }
+    }
+    const points = shortestRoute.overview_polyline.points;
+    const coords = polyline.decode(points).map(([lat, lng]: [number, number]) => ({ latitude: lat, longitude: lng }));
+    if (isMounted) {
+      setRouteCoords(coords);
+      setRouteDistance(shortestRoute.legs[0].distance.text);
+      setRouteDuration(shortestRoute.legs[0].duration.text);
+    }
+  } else {
+    if (isMounted) {
+      setRouteCoords(null);
+      setRouteDistance(null);
+      setRouteDuration(null);
+    }
+  }
       } catch (e) {
         if (isMounted) {
           setRouteCoords(null);
@@ -314,14 +338,9 @@ function RequestDetailScreen({ route, navigation }: Props) {
         {/* Only show map and address if not completed */}
         {request.status !== 'completed' && helperLocation && request.latitude && request.longitude && (
           <>
-            {(routeDistance || routeDuration) && (
+            {routeDistance && (
               <View style={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginBottom: 6 }}>
-                {routeDistance && (
-                  <Text style={{ color: '#34d399', fontWeight: 'bold', fontSize: 15, marginRight: 12 }}>Distance: {routeDistance}</Text>
-                )}
-                {routeDuration && (
-                  <Text style={{ color: '#bdbdbd', fontWeight: 'bold', fontSize: 15 }}>ETA: {routeDuration}</Text>
-                )}
+                <Text style={{ color: '#34d399', fontWeight: 'bold', fontSize: 15 }}>Distance: {routeDistance}</Text>
               </View>
             )}
             <View style={{ height: 220, borderRadius: 14, overflow: 'hidden', marginBottom: 18 }}>

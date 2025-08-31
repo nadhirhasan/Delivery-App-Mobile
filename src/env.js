@@ -1,3 +1,3 @@
-export const GOOGLE_MAPS_API_KEY = "GOOGLE_MAP_API_KEY";
-export const EXPO_PUBLIC_SUPABASE_ANON_KEY = "API_KEY";
-export const EXPO_PUBLIC_SUPABASE_URL = "SUPBASE_URL";
+export const GOOGLE_MAPS_API_KEY = "AIzaSyCbh7alUrFlu_pJ6d0k00OHogyOdzgso0I";
+export const EXPO_PUBLIC_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR6aGp3dG9odHBwcXlrc2t1bnByIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTU5MTM2NDcsImV4cCI6MjA3MTQ4OTY0N30.u51nTd4B2KJgZ-ZSF2vcMHejQrrb4eKoBHENbg2QJcM";
+export const EXPO_PUBLIC_SUPABASE_URL = "https://tzhjwtohtppqykskunpr.supabase.co";
